@@ -1,0 +1,753 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Color Clash</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800&display=swap">
+<style>
+/* Layout concept: a one-screen card table. Opponent seats across the top,
+   draw + discard piles in the middle, your hand fills the bottom and scrolls if it gets big.
+   Light theme only, on purpose (owner preference), so colors are set once here. */
+:root {
+  --table: #E4ECE6;      /* pale sage felt */
+  --surface: #FFFFFF;
+  --ink: #1D2925;
+  --muted: #5B6B65;
+  --line: #C6D4CC;
+  --accent: #1F4D45;     /* deep green for buttons */
+  --accent-ink: #FFFFFF;
+  --hot: #E0482F;        /* Uno / alert */
+  --c-r: #D63A3A;
+  --c-y: #E3A100;
+  --c-g: #2C9658;
+  --c-b: #2F6BCF;
+  --c-w: #262A31;
+  --back: #24324A;
+  --tip: #6B3FC9;        /* Easy-mode suggestion highlight */
+  --tip-bg: #EEE7FB;
+  --font-display: "Fredoka", "Nunito", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cw: 58px;            /* hand card width; grows on laptops below */
+  --ch: 87px;
+  color-scheme: light;
+}
+@media (min-width: 720px) { :root { --cw: 76px; --ch: 114px; } }
+
+html, body { height: 100%; }
+body {
+  background: var(--table); color: var(--ink);
+  font-family: var(--font-body); font-size: 15px;
+  overflow: hidden; -webkit-tap-highlight-color: transparent;
+  user-select: none; -webkit-user-select: none;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, select:focus-visible { outline: 3px solid var(--c-b); outline-offset: 2px; }
+
+/* ---------- Main app column ---------- */
+#app {
+  height: 100%; max-width: 980px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 10px;
+  box-sizing: border-box;
+}
+header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.brand { font-family: var(--font-display); font-weight: 700; font-size: 22px; letter-spacing: .2px; display: flex; align-items: center; gap: 8px; }
+.brand i { display: inline-grid; grid-template-columns: 1fr 1fr; width: 18px; height: 18px; border-radius: 5px; overflow: hidden; transform: rotate(12deg); }
+.brand i b:nth-child(1){background:var(--c-r)} .brand i b:nth-child(2){background:var(--c-y)}
+.brand i b:nth-child(3){background:var(--c-b)} .brand i b:nth-child(4){background:var(--c-g)}
+.hbtns { display: flex; gap: 6px; }
+.ghost { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 7px 12px; font-weight: 700; font-size: 14px; }
+
+/* ---------- Round table ----------
+   Everyone sits around an oval table in play order, You at the bottom.
+   A ring of arrows inside the seats shows which way play is moving; the arrow leaving
+   the current player is big, solid green and nudging toward whoever goes next. */
+#table { position: relative; width: 100%; max-width: 620px; margin: 0 auto; height: clamp(280px, 38vh, 470px); flex: none; }
+.felt { position: absolute; inset: 9%; border-radius: 50%; background: radial-gradient(ellipse at 50% 38%, #D6E5DA, #BCD2C4);
+  box-shadow: inset 0 0 0 6px #fff, inset 0 0 0 7px var(--line), 0 6px 18px rgba(29,41,37,.12); }
+#table.flip .felt { animation: flip 1s ease-out; }
+@keyframes flip { 0%, 45% { background: #F6D3CB; } }
+.ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.ring ellipse { fill: none; stroke: var(--accent); stroke-opacity: .3; stroke-width: 2; stroke-dasharray: 3 6; vector-effect: non-scaling-stroke; }
+.arrow { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; color: var(--accent); opacity: .45; pointer-events: none; z-index: 1; }
+.arrow svg { width: 100%; height: 100%; display: block; }
+.arrow.hot { width: 32px; height: 32px; margin: -16px 0 0 -16px; opacity: 1; filter: drop-shadow(0 2px 2px rgba(31,77,69,.35)); }
+.arrow.hot svg { animation: nudge .8s ease-in-out infinite alternate; }
+@keyframes nudge { to { transform: translateX(4px); } }
+
+/* Seats sit on the table's rim */
+.seat {
+  position: absolute; transform: translate(-50%, -50%); width: 78px; box-sizing: border-box; z-index: 2;
+  background: var(--surface); border: 2px solid var(--line); border-radius: 12px; padding: 5px 4px; text-align: center;
+  transition: background .2s, transform .2s;
+}
+.seat .nm { font-weight: 800; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seat .ct { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.seat .mini { width: 9px; height: 13px; border-radius: 2px; background: var(--back); flex: none; }
+.seat.you { border-color: var(--ink); }
+/* Active seat: solid fill + slightly bigger. Next seat: dashed outline + "Next" tag */
+.seat.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 4px 12px rgba(31,77,69,.3); z-index: 3; }
+.seat.active .ct { color: rgba(255,255,255,.85); }
+.seat.active .mini { background: #fff; }
+.seat.next { border: 2px dashed var(--accent); }
+.nexttag { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); background: var(--surface); color: var(--accent); border: 1px solid var(--accent); font-size: 9.5px; font-weight: 800; padding: 0 6px; border-radius: 99px; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+.tag { position: absolute; top: -9px; right: -6px; background: var(--hot); color: #fff; font-family: var(--font-display); font-weight: 700; font-size: 10.5px; padding: 1px 6px; border-radius: 99px; }
+.catch { position: absolute; inset: -2px; border-radius: 12px; border: 0; background: rgba(224,72,47,.95); color: #fff; font-weight: 800; font-size: 12px; animation: pulse .7s ease-in-out infinite alternate; }
+@media (min-width: 720px) { .seat { width: 100px; padding: 7px 6px; } .seat .nm { font-size: 14px; } .seat .ct { font-size: 12.5px; } }
+
+/* Center of the table: piles + current color */
+#center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 1; }
+.piles { display: flex; gap: 14px; }
+.pile { position: relative; border: 0; padding: 0; background: none; }
+.pile .count { position: absolute; bottom: 5px; left: 0; right: 0; text-align: center; font-size: 10.5px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; z-index: 1; }
+.big { --cw: 56px; --ch: 84px; }
+@media (min-width: 720px) { .big { --cw: 80px; --ch: 120px; } }
+.pile.canDraw .card { box-shadow: 0 0 0 3px var(--surface), 0 0 0 6px var(--accent); }
+.info { display: flex; gap: 6px; font-size: 12.5px; font-weight: 700; }
+.chip { display: flex; align-items: center; gap: 6px; background: var(--surface); border-radius: 99px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); white-space: nowrap; }
+.sw { width: 16px; height: 16px; border-radius: 50%; }
+.rev { background: var(--hot); color: #fff; font-size: 11px; font-weight: 800; padding: 4px 9px; border-radius: 99px; }
+
+/* ---------- Status line ---------- */
+#status { text-align: center; min-height: 40px; font-size: 14px; line-height: 1.35; }
+#status .now { font-weight: 800; text-wrap: balance; }
+#status .prev { color: var(--muted); font-size: 12.5px; }
+
+/* ---------- Your bar + hand ---------- */
+/* Your bar turns solid green on your turn so it's impossible to miss */
+#me { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 6px 6px 12px; border-radius: 14px; min-height: 50px; box-sizing: border-box; transition: background .2s; }
+#me .who { font-weight: 800; flex: 1; min-width: 0; }
+#me .who small { color: var(--muted); font-weight: 600; }
+#me.active { background: var(--accent); color: var(--accent-ink); }
+#me.active .who { font-family: var(--font-display); font-size: 18px; }
+#me.active .who small { color: rgba(255,255,255,.8); font-family: var(--font-body); font-size: 14px; }
+#hand.mine { box-shadow: inset 0 0 0 3px var(--accent); background: rgba(255,255,255,.8); }
+.btn { border: 0; border-radius: 12px; padding: 9px 16px; font-weight: 800; background: var(--accent); color: var(--accent-ink); }
+.btn:disabled { opacity: .35; cursor: default; }
+.btn.uno { background: var(--hot); font-family: var(--font-display); letter-spacing: .5px; font-size: 16px; padding: 8px 18px; }
+.btn.uno.armed { box-shadow: 0 0 0 3px var(--table), 0 0 0 5px var(--hot); }
+.btn.alt { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+#hand {
+  flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  display: flex; flex-wrap: wrap; justify-content: center; align-content: flex-start; gap: 22px 8px;
+  padding: 28px 10px 16px; /* room above row 1 for lifted cards + their rings (was clipping) */ background: rgba(255,255,255,.45); border-radius: 16px;
+}
+
+/* ---------- Card faces (drawn in CSS, no images) ---------- */
+.card {
+  width: var(--cw); height: var(--ch); border-radius: calc(var(--cw) * .14);
+  position: relative; flex: none; border: 0; padding: 0; color: #fff;
+  box-shadow: 0 0 0 3px #fff, 0 3px 8px rgba(29,41,37,.25);
+  font-family: var(--font-display); font-weight: 700;
+  transition: transform .15s, opacity .15s, box-shadow .15s;
+  overflow: hidden;
+}
+.card.r { background: var(--c-r); } .card.y { background: var(--c-y); }
+.card.g { background: var(--c-g); } .card.b { background: var(--c-b); } .card.w { background: var(--c-w); }
+/* soft diagonal sheen so the faces don't look flat */
+.card::before { content: ""; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(255,255,255,.22) 0 38%, rgba(255,255,255,0) 38% 100%); pointer-events: none; }
+.card .mid { position: absolute; inset: 0; display: grid; place-items: center; font-size: calc(var(--cw) * .58); text-shadow: 0 2px 0 rgba(0,0,0,.28); line-height: 1; }
+.card .mid svg { width: 58%; height: auto; filter: drop-shadow(0 2px 0 rgba(0,0,0,.28)); }
+.card .tl, .card .br { position: absolute; font-size: calc(var(--cw) * .22); line-height: 1; display: flex; }
+.card .tl { top: 6%; left: 9%; } .card .br { bottom: 6%; right: 9%; transform: rotate(180deg); }
+.card .tl svg, .card .br svg { width: calc(var(--cw) * .22); height: calc(var(--cw) * .22); }
+.u { text-decoration: underline; text-decoration-thickness: .08em; text-underline-offset: .08em; } /* marks 6 vs 9 */
+/* wild: four-color wheel */
+.wheel { width: 62%; aspect-ratio: 1; border-radius: 50%; max-width: 100%;
+  background: conic-gradient(var(--c-r) 0 25%, var(--c-y) 0 50%, var(--c-g) 0 75%, var(--c-b) 0);
+  box-shadow: 0 0 0 3px #fff; display: grid; place-items: center; }
+.wheel span { font-size: calc(var(--cw) * .3); text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+/* card back */
+.card.back { background: var(--back); }
+.card.back::before { background: repeating-linear-gradient(45deg, rgba(255,255,255,.07) 0 6px, transparent 6px 12px); }
+.card.back .mid span { font-size: calc(var(--cw) * .26); letter-spacing: 1px; background: #fff; color: var(--back); padding: .2em .45em; border-radius: 6px; transform: rotate(-14deg); text-shadow: none; }
+
+/* hand states */
+#hand .card.play { transform: translateY(-6px); box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--accent), 0 6px 12px rgba(29,41,37,.25); }
+#hand .card.dim { opacity: .45; }
+
+/* ---------- Easy-mode suggestion ----------
+   Violet so it can't be confused with any card color or the green "your turn" cues. */
+#hand .card.best { transform: translateY(-10px); box-shadow: 0 0 0 3px #fff, 0 0 0 7px var(--tip), 0 10px 18px rgba(107,63,201,.4); animation: bob 1.4s ease-in-out infinite; z-index: 1; }
+@keyframes bob { 50% { transform: translateY(-14px); } }
+.card .star { position: absolute; top: 4px; left: 50%; transform: translateX(-50%); z-index: 2; background: var(--tip); color: #fff; font-family: var(--font-body); font-size: 9.5px; font-weight: 800; padding: 1px 6px; border-radius: 99px; white-space: nowrap; text-shadow: none; }
+.pile.hint .card { box-shadow: 0 0 0 3px #fff, 0 0 0 7px var(--tip); animation: bob 1.4s ease-in-out infinite; }
+#tip { background: var(--tip-bg); border-radius: 12px; padding: 8px 12px; font-size: 13.5px; line-height: 1.4; text-wrap: pretty; }
+#tip .k { background: var(--tip); color: #fff; font-size: 10.5px; letter-spacing: .6px; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; margin-right: 7px; vertical-align: 1px; }
+.picks button.best { box-shadow: 0 0 0 3px #fff, 0 0 0 6px var(--tip); }
+.picks button small { display: block; font-family: var(--font-body); font-size: 12px; font-weight: 800; margin-top: 2px; }
+#hand .card.shake { animation: shake .3s; }
+.land { animation: land .35s ease-out; }
+@keyframes land { from { transform: translateY(-30px) rotate(-12deg) scale(1.1); opacity: .2; } }
+@keyframes shake { 25%{transform:translateX(-5px)} 75%{transform:translateX(5px)} }
+@keyframes pulse { to { filter: brightness(1.12); } }
+@media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+
+/* ---------- Dialogs ---------- */
+.overlay { position: fixed; inset: 0; background: rgba(29,41,37,.4); display: grid; place-items: center; z-index: 50;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.sheet { background: var(--surface); border-radius: 18px; padding: 20px; width: 100%; max-width: 440px; max-height: 100%; overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px; }
+.sheet h2 { margin: 0; font-family: var(--font-display); font-size: 22px; text-wrap: balance; }
+.sheet p { margin: 0; line-height: 1.45; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.row label { font-weight: 700; }
+select { font: inherit; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.picks { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.picks button { border: 0; border-radius: 14px; height: 74px; color: #fff; font-family: var(--font-display); font-size: 19px; font-weight: 700; text-shadow: 0 1px 0 rgba(0,0,0,.3); }
+.scores { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.scores td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.scores td:last-child { text-align: right; font-weight: 800; }
+.scores tr.win td { color: var(--accent); }
+.rules { margin: 0; padding-left: 18px; line-height: 1.5; display: flex; flex-direction: column; gap: 6px; }
+.ver { color: var(--muted); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+</style>
+
+<div id="app">
+  <header>
+    <div class="brand"><i><b></b><b></b><b></b><b></b></i>Color Clash</div>
+    <div class="hbtns">
+      <button class="ghost" id="rulesBtn">Rules</button>
+      <button class="ghost" id="setBtn">Settings</button>
+    </div>
+  </header>
+  <section id="table" aria-label="Table"></section>
+  <div id="status" aria-live="polite"></div>
+  <div id="tip" hidden></div>
+  <div id="me"></div>
+  <section id="hand" aria-label="Your hand"></section>
+</div>
+<div id="modal"></div>
+
+<script>
+/* =====================================================================
+   Color Clash: Uno-rules card game vs computer players. Single file.
+   Rules follow the standard 108-card game (see Rules dialog).
+   ===================================================================== */
+const VERSION = 'v2026.11.04.04';
+
+/* ---------- Constants & settings ---------- */
+const COLORS = ['r', 'y', 'g', 'b'];
+const CNAME = { r: 'Red', y: 'Yellow', g: 'Green', b: 'Blue', w: 'Wild' };
+const CVAR = { r: 'var(--c-r)', y: 'var(--c-y)', g: 'var(--c-g)', b: 'var(--c-b)' };
+const BOT_NAMES = ['Ada', 'Bo', 'Cyrus', 'Dot', 'Eli', 'Faye', 'Gus', 'Hazel', 'Ike'];
+const SPEED = { relaxed: 1500, normal: 950, fast: 500 }; // ms a bot "thinks"
+
+// Settings persist per browser. Wrapped in try/catch because storage can be blocked.
+// level: 'easy' bots play a random legal card and are sloppy about Uno; 'normal' bots play smart.
+let S = { bots: 3, target: 500, speed: 'normal', level: 'normal' };
+try { Object.assign(S, JSON.parse(localStorage.getItem('cc-settings') || '{}')); } catch (e) {}
+function saveSettings() { try { localStorage.setItem('cc-settings', JSON.stringify(S)); } catch (e) {} }
+
+/* ---------- Game state ----------
+   G holds everything about the current match. `gen` bumps on every new game so
+   any bot timers still pending from an old game quietly cancel themselves. */
+let G = null, uid = 0, gen = 0, lastLanded = null;
+
+const $ = s => document.querySelector(s);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const mk = (color, type, val = null) => ({ id: ++uid, color, type, val });
+const cur = () => G.players[G.turn];
+const who = i => i === 0 ? 'You' : G.players[i].name;
+const delay = () => SPEED[S.speed] + Math.random() * 300;
+
+// Seat index `steps` places away in the current direction of play.
+function idx(i, steps = 1) { const n = G.players.length; return ((i + G.dir * steps) % n + n) % n; }
+
+// Standard deck: per color one 0, two each of 1-9, Skip, Reverse, Draw Two. Plus 4 Wild, 4 Wild Draw Four = 108.
+function buildDeck() {
+  const d = [];
+  for (const c of COLORS) {
+    d.push(mk(c, 'num', 0));
+    for (let k = 0; k < 2; k++) {
+      for (let v = 1; v <= 9; v++) d.push(mk(c, 'num', v));
+      d.push(mk(c, 'skip'), mk(c, 'rev'), mk(c, 'd2'));
+    }
+  }
+  for (let k = 0; k < 4; k++) d.push(mk('w', 'wild'), mk('w', 'wd4'));
+  return shuffle(d);
+}
+
+function describe(c) {
+  const name = { num: c.val, skip: 'Skip', rev: 'Reverse', d2: 'Draw Two', wild: 'Wild', wd4: 'Wild Draw Four' }[c.type];
+  return c.color === 'w' ? name : `${CNAME[c.color]} ${name}`;
+}
+// Scoring: number cards = face value, colored action cards = 20, wilds = 50.
+const points = c => c.type === 'num' ? c.val : (c.color === 'w' ? 50 : 20);
+
+/* ---------- Rules check ----------
+   A card is playable if it matches the active color, or the number/symbol on top,
+   or it's a Wild. Wild Draw Four is only legal when you hold nothing in the active color
+   (we enforce this instead of using the challenge rule, so nobody can bluff it). */
+function canPlay(card, hand) {
+  const top = G.discard[G.discard.length - 1];
+  if (card.type === 'wild') return true;
+  if (card.type === 'wd4') return !hand.some(c => c !== card && c.color === G.color);
+  if (card.color === G.color) return true;
+  if (card.type === 'num') return top.type === 'num' && top.val === card.val;
+  return card.type === top.type;
+}
+
+/* ---------- Drawing (with reshuffle when the pile runs out) ---------- */
+function drawCards(pi, k) {
+  const p = G.players[pi], got = [];
+  for (let i = 0; i < k; i++) {
+    if (!G.deck.length) {
+      // Keep the top discard, shuffle the rest back in as the new draw pile.
+      const top = G.discard.pop();
+      G.deck = shuffle(G.discard); G.discard = [top];
+    }
+    if (!G.deck.length) break; // extremely rare: every card is in someone's hand
+    const c = G.deck.pop(); p.hand.push(c); got.push(c);
+  }
+  if (p.hand.length > 2) p.unoCalled = false;
+  if (G.vuln === pi && p.hand.length !== 1) G.vuln = null;
+  return got;
+}
+
+/* ---------- Match / round setup ---------- */
+function newMatch() {
+  gen++; closeModal();
+  const bots = shuffle(BOT_NAMES.slice()).slice(0, S.bots);
+  G = {
+    players: [{ name: 'You', bot: false, hand: [], score: 0 }, ...bots.map(n => ({ name: n, bot: true, hand: [], score: 0 }))],
+    dealer: Math.floor(Math.random() * (S.bots + 1)),
+    round: 0, log: []
+  };
+  startRound();
+}
+
+function startRound() {
+  G.round++; G.deck = buildDeck(); G.discard = []; G.dir = 1;
+  G.vuln = null; G.drawn = null; G.phase = 'busy';
+  G.lastDir = undefined; G.revFlash = 0; // don't flash "Reversed" just because a new hand reset direction
+  G.players.forEach(p => { p.hand = []; p.unoCalled = false; });
+  // Deal 7 each.
+  for (let k = 0; k < 7; k++) for (const p of G.players) p.hand.push(G.deck.pop());
+
+  // Flip the first card. A Wild Draw Four can't start the game: bury it and flip again.
+  let top = G.deck.pop();
+  while (top.type === 'wd4') { G.deck.push(top); shuffle(G.deck); top = G.deck.pop(); }
+  G.discard.push(top); G.color = top.color === 'w' ? null : top.color;
+
+  const left = idx(G.dealer, 1), n = G.players.length;
+  G.log = [];
+  say(`Hand ${G.round}. ${who(G.dealer)} dealt${G.dealer === 0 ? '' : 's'}. First card: ${describe(top)}.`);
+
+  // The first card acts as if the dealer played it.
+  switch (top.type) {
+    case 'num': G.turn = left; break;
+    case 'skip': G.turn = idx(G.dealer, 2); say(`${who(left)} ${left === 0 ? 'are' : 'is'} skipped.`); break;
+    case 'rev':
+      if (n === 2) { G.turn = G.dealer; } else { G.dir = -1; G.turn = G.dealer; }
+      say('Play goes the other way. Dealer starts.'); break;
+    case 'd2': drawCards(left, 2); G.turn = idx(G.dealer, 2); say(`${who(left)} draw${left === 0 ? '' : 's'} 2 and ${left === 0 ? 'are' : 'is'} skipped.`); break;
+    case 'wild':
+      G.turn = left;
+      if (left === 0) { render(); openPicker(c => { G.color = c; say(`You picked ${CNAME[c]}.`); beginTurn(); }, false, botColor(0)); return; }
+      G.color = botColor(left); say(`${who(left)} picked ${CNAME[G.color]}.`); break;
+  }
+  beginTurn();
+}
+
+/* ---------- Turn engine ---------- */
+function beginTurn() {
+  G.phase = 'turn'; G.drawn = null;
+  render();
+  if (cur().bot) { const my = gen; setTimeout(() => { if (my === gen) botTurn(); }, delay()); }
+  // Human turn: nothing to do, we wait for a tap.
+}
+function advance(next) { G.turn = next; beginTurn(); }
+
+// Plays a card for any player and applies its effect. `chosen` is the color for wilds.
+function doPlay(pi, card, chosen) {
+  const p = G.players[pi], n = G.players.length;
+  p.hand.splice(p.hand.indexOf(card), 1);
+  G.discard.push(card);
+  G.color = card.color === 'w' ? chosen : card.color;
+  G.drawn = null;
+
+  let msg = `${who(pi)} played ${describe(card)}${card.color === 'w' ? `, picked ${CNAME[chosen]}` : ''}.`;
+
+  // Uno rule: going down to one card without calling it leaves you open to being caught.
+  if (p.hand.length === 1) { if (p.unoCalled) msg += ' Uno!'; else G.vuln = pi; }
+
+  let next = idx(pi, 1);
+  const nx = who(next), you = next === 0;
+  switch (card.type) {
+    case 'skip': msg += ` ${nx} ${you ? 'are' : 'is'} skipped.`; next = idx(pi, 2); break;
+    case 'rev':
+      if (n === 2) { msg += ` ${nx} ${you ? 'are' : 'is'} skipped.`; next = idx(pi, 2); } // 2 players: Reverse = Skip
+      else { G.dir *= -1; next = idx(pi, 1); msg += ' Direction reversed.'; }
+      break;
+    case 'd2': drawCards(next, 2); msg += ` ${nx} draw${you ? '' : 's'} 2 and lose${you ? '' : 's'} a turn.`; next = idx(pi, 2); break;
+    case 'wd4': drawCards(next, 4); msg += ` ${nx} draw${you ? '' : 's'} 4 and lose${you ? '' : 's'} a turn.`; next = idx(pi, 2); break;
+  }
+  say(msg);
+  if (!p.hand.length) return endRound(pi);
+  advance(next);
+}
+
+/* ---------- Computer players ---------- */
+// Most common color in the bot's hand (ignoring wilds) is the color it names.
+function botColor(pi, skip) {
+  const cnt = { r: 0, y: 0, g: 0, b: 0 };
+  G.players[pi].hand.forEach(c => { if (c !== skip && c.color !== 'w') cnt[c.color]++; });
+  const best = Math.max(...Object.values(cnt));
+  return best === 0 ? COLORS[Math.floor(Math.random() * 4)] : shuffle(COLORS.filter(c => cnt[c] === best))[0];
+}
+
+/* ---------- Card strategy ----------
+   One scoring brain shared by the smart bots AND the Easy-mode hint for you,
+   so the hint suggests exactly what a Normal bot would play in your seat.
+   Hold wilds for later, attack when the next player is close to winning. */
+function bestCard(pi, jitter) {
+  const hand = G.players[pi].hand;
+  const legal = hand.filter(c => canPlay(c, hand));
+  if (!legal.length) return null;
+  const nextCount = G.players[idx(pi, 1)].hand.length;
+  const colorCount = col => hand.filter(c => c.color === col).length;
+  let best = null, bestScore = -Infinity;
+  for (const c of legal) {
+    let s = jitter ? Math.random() * 0.6 : 0;              // bots get a little randomness; the hint doesn't
+    if (c.type === 'num') s += c.val * 0.12;               // dump high numbers (they cost points)
+    else if (c.color !== 'w') s += nextCount <= 2 ? 4 : 1.2; // actions, extra when someone's about to win
+    if (c.type === 'wild') s -= 3;
+    if (c.type === 'wd4') s += nextCount <= 2 ? 3 : -2;
+    if (c.color !== 'w') s += colorCount(c.color) * 0.5;    // stay in the color it has most of
+    if (s > bestScore) { bestScore = s; best = c; }
+  }
+  return best;
+}
+function botChoose(pi) {
+  const hand = G.players[pi].hand;
+  const legal = hand.filter(c => canPlay(c, hand));
+  if (!legal.length) return null;
+  if (S.level === 'easy') return legal[Math.floor(Math.random() * legal.length)]; // easy bots: no strategy at all
+  return bestCard(pi, true);
+}
+
+// Plain-English "why" for the suggested card, so the hint teaches instead of just pointing.
+function hintReason(c) {
+  const me = G.players[0], nI = idx(0, 1), nN = G.players[nI].hand.length, nName = G.players[nI].name;
+  const more = me.hand.filter(x => x !== c && x.color === c.color).length;
+  const legalCount = me.hand.filter(x => canPlay(x, me.hand)).length;
+  const low = `${nName} only has ${nN} card${nN === 1 ? '' : 's'} left`;
+  if ((c.type === 'skip' || c.type === 'd2' || c.type === 'wd4') && nN <= 2) return `${low}. This slows them down.`;
+  if (c.type === 'rev' && nN <= 2) return `${low}. This sends play away from them.`;
+  if (c.type === 'wild') return legalCount === 1 ? 'It\'s your only play. Pick the color you have the most of.' : 'Switches to the color you have the most of.';
+  if (c.type === 'wd4') return legalCount === 1 ? 'It\'s your only play, and the next player draws 4.' : 'The next player draws 4 and you pick your best color.';
+  if (c.type !== 'num') return 'Action cards cost you 20 points if you\'re stuck with them when someone goes out. Use them while they fit.';
+  if (c.val >= 6) return `Gets rid of a high number (a ${c.val} costs ${c.val} points if you're stuck with it)${more ? ` and keeps you in ${CNAME[c.color]}, where you have ${more} more` : ''}.`;
+  return more ? `Keeps you in ${CNAME[c.color]}, where you have ${more} more cards to follow up with.` : 'A cheap card that fits. Saves your stronger cards for later.';
+}
+
+function botTurn() {
+  if (!G || G.phase !== 'turn') return;
+  const pi = G.turn, p = cur();
+
+  // Before acting, a bot may catch you if you went to 1 card without calling Uno.
+  if (G.vuln === 0 && G.players[0].hand.length === 1 && Math.random() < (S.level === 'easy' ? 0.35 : 0.75)) {
+    drawCards(0, 2); say(`${p.name} caught you not calling Uno. You draw 2.`);
+  }
+  G.vuln = null; // window closes once the next player acts
+
+  const card = botChoose(pi);
+  if (card) return botPlay(pi, card);
+
+  // Nothing playable: draw one. If it fits, the bot usually plays it right away.
+  const [c] = drawCards(pi, 1);
+  say(`${p.name} drew a card.`);
+  if (c && canPlay(c, p.hand) && Math.random() < 0.9) {
+    render();
+    const my = gen;
+    setTimeout(() => { if (my === gen) botPlay(pi, c); }, delay() * 0.6);
+    return;
+  }
+  advance(idx(pi, 1));
+}
+function botPlay(pi, card) {
+  const p = G.players[pi];
+  if (p.hand.length === 2) p.unoCalled = Math.random() < (S.level === 'easy' ? 0.5 : 0.8); // bots forget sometimes: catch them!
+  doPlay(pi, card, card.color === 'w' ? botColor(pi, card) : null);
+}
+
+/* ---------- Your actions ---------- */
+function onHandTap(id, el) {
+  if (!G || G.phase !== 'turn' || cur().bot) return;
+  const me = G.players[0], card = me.hand.find(c => c.id === id);
+  if (!card) return;
+  const ok = G.drawn ? card === G.drawn : canPlay(card, me.hand);
+  if (!ok) {
+    el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+    if (card.type === 'wd4') say('Wild Draw Four only works when you have no cards of the current color.');
+    else if (G.drawn) say('You can only play the card you just drew, or keep it.');
+    render(); return;
+  }
+  G.vuln = null; // you acting closes any chance to catch a bot
+  if (card.color === 'w') openPicker(col => doPlay(0, card, col), true, botColor(0, card));
+  else doPlay(0, card);
+}
+function onDraw() {
+  if (!G || G.phase !== 'turn' || cur().bot || G.drawn) return;
+  G.vuln = null;
+  const [c] = drawCards(0, 1);
+  if (c && canPlay(c, G.players[0].hand)) { G.drawn = c; say(`You drew ${describe(c)}. Play it or keep it.`); render(); }
+  else {
+    say(c ? `You drew ${describe(c)}. No play.` : 'No cards left to draw.');
+    G.phase = 'busy'; render();
+    const my = gen; setTimeout(() => { if (my === gen) advance(idx(0, 1)); }, 700);
+  }
+}
+function onKeep() { if (G && G.drawn && !cur().bot) { say('You kept the card.'); advance(idx(0, 1)); } }
+function onUno() {
+  const me = G.players[0];
+  if (G.vuln === 0) { G.vuln = null; say('You called Uno!'); }
+  else if (me.hand.length <= 2) { me.unoCalled = true; say('Uno is called. Play your card.'); }
+  render();
+}
+function onCatch(i) {
+  if (G.vuln !== i) return;
+  G.vuln = null; drawCards(i, 2);
+  say(`You caught ${G.players[i].name} not calling Uno. ${G.players[i].name} draws 2.`);
+  render();
+}
+
+/* ---------- End of hand & scoring ---------- */
+function endRound(wi) {
+  G.phase = 'over'; G.vuln = null;
+  const pts = G.players.reduce((s, p, i) => i === wi ? s : s + p.hand.reduce((a, c) => a + points(c), 0), 0);
+  G.players[wi].score += pts;
+  render();
+  const matchOver = S.target === 0 || G.players[wi].score >= S.target;
+  const rows = G.players.map((p, i) => ({ p, i })).sort((a, b) => b.p.score - a.p.score)
+    .map(({ p, i }) => `<tr class="${i === wi ? 'win' : ''}"><td>${i === 0 ? 'You' : p.name}${i === wi ? ' (won hand)' : ''}</td><td>${p.hand.length} left</td><td>${p.score}</td></tr>`).join('');
+  const title = matchOver
+    ? (S.target === 0 ? (wi === 0 ? 'You win!' : `${G.players[wi].name} wins`) : (wi === 0 ? 'You won the game!' : `${G.players[wi].name} won the game`))
+    : (wi === 0 ? 'You won the hand' : `${G.players[wi].name} won the hand`);
+  showModal(`
+    <h2>${title}</h2>
+    <p>${wi === 0 ? 'You score' : G.players[wi].name + ' scores'} <b>${pts}</b> points from the cards left in other hands.${S.target ? ` First to ${S.target} wins.` : ''}</p>
+    <table class="scores">${rows}</table>
+    <div class="acts">${matchOver ? '<button class="btn" id="mNew">Play again</button>' : '<button class="btn" id="mNext">Next hand</button>'}</div>`);
+  if (matchOver) $('#mNew').onclick = newMatch;
+  else $('#mNext').onclick = () => { closeModal(); G.dealer = ((G.dealer + 1) % G.players.length); startRound(); };
+}
+
+/* ---------- Rendering ----------
+   Whole UI is redrawn from G on every change. Simple and fast enough for a card game. */
+const ICON = {
+  skip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="8.5"/><path d="M6 18 18 6"/></svg>',
+  rev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h14l-3.5-3.5M20 15H6l3.5 3.5"/></svg>'
+};
+function face(c) {
+  if (c.type === 'num') { const t = (c.val === 6 || c.val === 9) ? `<span class="u">${c.val}</span>` : c.val; return [t, t]; }
+  if (c.type === 'skip' || c.type === 'rev') return [ICON[c.type], ICON[c.type]];
+  if (c.type === 'd2') return ['+2', '+2'];
+  if (c.type === 'wd4') return ['<div class="wheel"><span>+4</span></div>', '+4'];
+  return ['<div class="wheel"></div>', 'W'];
+}
+function cardHTML(c, extra = '', tag = 'div', attrs = '') {
+  const [mid, corner] = face(c);
+  const star = extra.includes('best') ? '<span class="star">★ Best</span>' : ''; // Easy-mode suggestion badge
+  return `<${tag} class="card ${c.color} ${extra}" ${attrs} aria-label="${describe(c)}${star ? ' (suggested)' : ''}">${star}<span class="tl">${corner}</span><span class="mid">${mid}</span><span class="br">${corner}</span></${tag}>`;
+}
+const ARROW = '<svg viewBox="0 0 24 24"><path d="M3 12h15M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const backHTML = (extra = '') => `<div class="card back ${extra}"><span class="mid"><span>CC</span></span></div>`;
+
+const ORDER = { r: 0, y: 1, g: 2, b: 3, w: 4 };
+const TORDER = { num: 0, skip: 1, rev: 2, d2: 3, wild: 4, wd4: 5 };
+
+function render() {
+  if (!G) return;
+  const me = G.players[0], myTurn = G.phase === 'turn' && G.turn === 0;
+
+  const live = G.phase !== 'over', nextI = idx(G.turn, 1);
+
+  // Easy-mode hint: the drawn card if you just drew a playable one, otherwise the best card in hand.
+  const canDraw = myTurn && !G.drawn;
+  const hint = (S.level === 'easy' && myTurn) ? (G.drawn || bestCard(0, false)) : null;
+  const drawHint = S.level === 'easy' && canDraw && !hint; // nothing fits: point at the deck
+
+  /* ---- Round table ----
+     Seat i sits at angle 90deg + i * (360/n). 90deg is straight down (you), and angles grow
+     clockwise on screen, so higher seat numbers go around to your left, like real Uno.
+     Arrows sit on an inner ring, one between each pair of neighbors. */
+  const T = $('#table'), W = T.clientWidth || 360, H = T.clientHeight || 320, n = G.players.length;
+  const SRX = 39, SRY = 41;   // seat ring radius, % of table width / height
+  const ARX = 29, ARY = 31;   // arrow ring radius
+  const pos = (deg, rx, ry) => { const r = deg * Math.PI / 180; return [50 + rx * Math.cos(r), 50 + ry * Math.sin(r)]; };
+
+  // Flash the felt and show a "Reversed" pill right after a Reverse changes direction.
+  const flipped = G.lastDir !== undefined && G.lastDir !== G.dir; G.lastDir = G.dir;
+  if (flipped) G.revFlash = Date.now();
+  const showRev = G.revFlash && Date.now() - G.revFlash < 2500;
+
+  let html = `<div class="felt"></div>
+    <svg class="ring" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="50" rx="${ARX}" ry="${ARY}"/></svg>`;
+
+  // Arrows: arrow i sits between seat i and seat i+1. The one leaving the current player is "hot".
+  const hotArrow = G.dir === 1 ? G.turn : (G.turn - 1 + n) % n;
+  for (let i = 0; i < n; i++) {
+    const deg = 90 + (i + 0.5) * 360 / n, [x, y] = pos(deg, ARX, ARY), r = deg * Math.PI / 180;
+    // Tangent of the ellipse in real pixels, so arrows follow the curve even on a wide table.
+    let rot = Math.atan2(ARY * H * Math.cos(r), -ARX * W * Math.sin(r)) * 180 / Math.PI;
+    if (G.dir === -1) rot += 180;
+    html += `<div class="arrow ${live && i === hotArrow ? 'hot' : ''}" style="left:${x}%;top:${y}%;transform:rotate(${rot}deg)">${ARROW}</div>`;
+  }
+
+  // Seats
+  for (let i = 0; i < n; i++) {
+    const p = G.players[i], [x, y] = pos(90 + i * 360 / n, SRX, SRY);
+    const active = G.turn === i && live, isNext = live && nextI === i && !active;
+    html += `<div class="seat ${i === 0 ? 'you' : ''} ${active ? 'active' : ''} ${isNext ? 'next' : ''}" style="left:${x}%;top:${y}%">
+      ${isNext ? '<span class="nexttag">Next</span>' : ''}
+      <div class="nm">${i === 0 ? 'You' : p.name}</div>
+      <div class="ct"><span class="mini"></span>${p.hand.length}${S.target ? ` · ${p.score}` : ''}</div>
+      ${p.hand.length === 1 && G.vuln !== i ? '<span class="tag">UNO</span>' : ''}
+      ${G.vuln === i && i !== 0 ? `<button class="catch" data-catch="${i}">Catch!</button>` : ''}
+    </div>`;
+  }
+
+  // Center: draw pile, discard, current color
+  const top = G.discard[G.discard.length - 1];
+  const land = lastLanded !== top.id ? 'land' : ''; lastLanded = top.id;
+  html += `<div id="center">
+    <div class="piles">
+      <button class="pile big ${canDraw ? 'canDraw' : ''} ${drawHint ? 'hint' : ''}" id="drawPile" aria-label="Draw a card">${backHTML()}<span class="count">${G.deck.length}</span></button>
+      <div class="pile big">${cardHTML(top, land)}</div>
+    </div>
+    <div class="info">
+      <div class="chip"><span class="sw" style="background:${G.color ? CVAR[G.color] : 'var(--line)'}"></span>${G.color ? CNAME[G.color] : 'Picking…'}</div>
+      ${showRev ? '<span class="rev">Reversed</span>' : ''}
+    </div>
+  </div>`;
+  T.className = flipped ? 'flip' : '';
+  T.innerHTML = html;
+
+  // Status: latest line bold, previous line faded
+  const [now, prev] = [G.log[G.log.length - 1] || '', G.log[G.log.length - 2] || ''];
+  const turnLine = G.phase === 'over' ? '' : (myTurn ? (G.drawn ? '' : 'Your turn. Tap a lifted card, or tap the deck to draw.') : `${cur().name} is thinking…`);
+  $('#status').innerHTML = `<div class="now">${now}</div><div class="prev">${turnLine || prev}</div>`;
+
+  // Easy-mode tip box: what to play and why. Hidden on bot turns and in Normal mode.
+  let tip = '';
+  if (S.level === 'easy' && myTurn) {
+    const uno = me.hand.length === 2 && !me.unoCalled && hint ? '<b>Tap UNO! first</b>, then play. ' : '';
+    if (G.drawn) tip = `${uno}The card you drew fits. Playing it is usually better than keeping it.`;
+    else if (hint) tip = `${uno}Play <b>${describe(hint)}</b>. ${hintReason(hint)}`;
+    else tip = 'Nothing in your hand fits. Tap the deck to draw a card.';
+  }
+  $('#tip').hidden = !tip;
+  $('#tip').innerHTML = `<b class="k">Tip</b>${tip}`;
+
+  // Your bar
+  const unoOn = G.phase !== 'over' && (G.vuln === 0 || (me.hand.length <= 2 && me.hand.length > 0));
+  $('#me').className = myTurn ? 'active' : '';
+  $('#hand').className = myTurn ? 'mine' : '';
+  const meLabel = myTurn ? 'Your turn!' : (live && nextI === 0 ? 'You (next)' : 'You');
+  $('#me').innerHTML = `
+    <div class="who">${meLabel} <small>· ${me.hand.length} card${me.hand.length === 1 ? '' : 's'}${S.target ? ` · ${me.score} pts` : ''}</small></div>
+    ${G.drawn && myTurn ? '<button class="btn alt" id="keepBtn">Keep it</button>' : ''}
+    <button class="btn uno ${me.unoCalled ? 'armed' : ''}" id="unoBtn" ${unoOn ? '' : 'disabled'}>UNO!</button>`;
+
+  // Your hand, sorted by color then card type
+  const sorted = me.hand.slice().sort((a, b) => ORDER[a.color] - ORDER[b.color] || TORDER[a.type] - TORDER[b.type] || (a.val ?? 0) - (b.val ?? 0));
+  $('#hand').innerHTML = sorted.map(c => {
+    let st = '';
+    if (myTurn) st = (G.drawn ? c === G.drawn : canPlay(c, me.hand)) ? 'play' : 'dim';
+    if (c === hint) st += ' best';
+    return cardHTML(c, st, 'button', `data-id="${c.id}"`);
+  }).join('');
+}
+function say(m) { G.log.push(m); if (G.log.length > 6) G.log.shift(); }
+
+/* ---------- Event wiring (delegated, since the UI re-renders) ---------- */
+document.addEventListener('click', e => {
+  const t = e.target;
+  const card = t.closest('#hand .card'); if (card) return onHandTap(+card.dataset.id, card);
+  if (t.closest('#drawPile')) return onDraw();
+  if (t.closest('#keepBtn')) return onKeep();
+  if (t.closest('#unoBtn')) return onUno();
+  const c = t.closest('[data-catch]'); if (c) return onCatch(+c.dataset.catch);
+});
+$('#setBtn').onclick = openSettings;
+window.addEventListener('resize', render); // arrows are angled using the table's real size
+$('#rulesBtn').onclick = openRules;
+
+/* ---------- Dialogs ---------- */
+function showModal(html) { $('#modal').innerHTML = `<div class="overlay"><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`; }
+function closeModal() { $('#modal').innerHTML = ''; }
+
+// Color picker for wilds. `cancelable` lets you back out if you tapped a wild by mistake.
+// `hint` is the color you hold most of; Easy mode marks it as the suggested pick.
+function openPicker(done, cancelable, hint) {
+  const prevPhase = G.phase; G.phase = 'choose';
+  const sug = S.level === 'easy' ? hint : null;
+  showModal(`<h2>Pick a color</h2>
+    ${sug ? `<p style="font-size:13.5px">Suggested: <b>${CNAME[sug]}</b>. You have the most cards in that color, so you're likely to have a follow-up play.</p>` : ''}
+    <div class="picks">${COLORS.map(c => `<button data-pick="${c}" class="${c === sug ? 'best' : ''}" style="background:${CVAR[c]}">${CNAME[c]}${c === sug ? '<small>★ Best</small>' : ''}</button>`).join('')}</div>
+    ${cancelable ? '<div class="acts"><button class="btn alt" id="pickCancel">Cancel</button></div>' : ''}`);
+  $('#modal').querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { closeModal(); G.phase = prevPhase; done(b.dataset.pick); });
+  if (cancelable) $('#pickCancel').onclick = () => { closeModal(); G.phase = prevPhase; render(); };
+}
+
+function openSettings() {
+  showModal(`<h2>Settings</h2>
+    <div class="row"><label for="sBots">Computer players</label>
+      <select id="sBots">${[1,2,3,4,5,6,7,8,9].map(n => `<option ${n === S.bots ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div class="row"><label for="sTarget">Game length</label>
+      <select id="sTarget">
+        <option value="0" ${S.target === 0 ? 'selected' : ''}>One hand</option>
+        <option value="200" ${S.target === 200 ? 'selected' : ''}>First to 200</option>
+        <option value="500" ${S.target === 500 ? 'selected' : ''}>First to 500 (official)</option>
+      </select></div>
+    <div class="row"><label for="sLevel">Bot skill</label>
+      <select id="sLevel">
+        <option value="easy" ${S.level === 'easy' ? 'selected' : ''}>Easy</option>
+        <option value="normal" ${S.level === 'normal' ? 'selected' : ''}>Normal</option>
+      </select></div>
+    <div class="row"><label for="sSpeed">Bot speed</label>
+      <select id="sSpeed">
+        <option value="relaxed" ${S.speed === 'relaxed' ? 'selected' : ''}>Relaxed</option>
+        <option value="normal" ${S.speed === 'normal' ? 'selected' : ''}>Normal</option>
+        <option value="fast" ${S.speed === 'fast' ? 'selected' : ''}>Fast</option>
+      </select></div>
+    <p style="color:var(--muted);font-size:13px">Player count and game length start a new game. Skill and speed apply right away. Easy bots play random cards and often miss your Uno slip.</p>
+    <div class="acts"><button class="btn alt" id="sClose">Close</button><button class="btn" id="sNew">New game</button></div>
+    <div class="ver">Color Clash ${VERSION}</div>`);
+  // Skill and speed apply instantly; player count and game length need a fresh game.
+  const read = () => { S.bots = +$('#sBots').value; S.target = +$('#sTarget').value; S.speed = $('#sSpeed').value; S.level = $('#sLevel').value; saveSettings(); };
+  $('#sSpeed').onchange = () => { S.speed = $('#sSpeed').value; saveSettings(); };
+  $('#sLevel').onchange = () => { S.level = $('#sLevel').value; saveSettings(); };
+  $('#sClose').onclick = () => {
+    const changed = +$('#sBots').value !== S.bots || +$('#sTarget').value !== S.target;
+    S.speed = $('#sSpeed').value; S.level = $('#sLevel').value; saveSettings();
+    if (changed) { read(); newMatch(); } else closeModal();
+  };
+  $('#sNew').onclick = () => { read(); newMatch(); };
+}
+
+function openRules() {
+  showModal(`<h2>How to play</h2>
+    <ul class="rules">
+      <li>Everyone starts with 7 cards. Get rid of all of yours first.</li>
+      <li>On your turn, play a card that matches the top card's <b>color</b>, <b>number</b>, or <b>symbol</b>. Wilds go on anything.</li>
+      <li>Can't play (or don't want to)? Tap the deck to draw one. If it fits, you can play it right away or keep it.</li>
+      <li><b>Skip</b>: next player loses their turn. <b>Reverse</b>: play changes direction (with 2 players it works like Skip).</li>
+      <li><b>Draw Two</b>: next player draws 2 and loses their turn. No stacking.</li>
+      <li><b>Wild</b>: you pick the new color. <b>Wild Draw Four</b>: pick the color, next player draws 4 and loses their turn. Only allowed when you have no cards of the current color.</li>
+      <li><b>Uno</b>: tap UNO! when you're about to go down to one card. If the next player acts before you call it, you can get caught and draw 2. Bots forget too. Tap <b>Catch</b> on their seat before the next player moves.</li>
+      <li>When someone goes out, they score the cards left in everyone else's hands: numbers at face value, Skip/Reverse/Draw Two 20, Wilds 50.</li>
+    </ul>
+    <div class="acts"><button class="btn" id="rClose">Got it</button></div>`);
+  $('#rClose').onclick = closeModal;
+}
+
+// Start a game right away so the table isn't empty on load.
+newMatch();
+</script>
+
+</body></html>
